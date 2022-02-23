@@ -444,6 +444,8 @@ residuals = pd.DataFrame({
 print(pd.DataFrame(([year, np.mean(group['abs_residual_lm']), np.mean(group['abs_residual_wt'])] 
               for year, group in residuals.groupby('Year')),
              columns=['Year', 'mean abs_residual_lm', 'mean abs_residual_wt']))
+print("-----------------------------------------------------------------------")
+
 
 
 
