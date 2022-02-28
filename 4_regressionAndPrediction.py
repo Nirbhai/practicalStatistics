@@ -41,6 +41,7 @@ pio.renderers.default = 'svg'
 # for machine learning models
 from sklearn.linear_model import LinearRegression
 import statsmodels.api as sm
+import statsmodels.formula.api as smf
 
 # for machine learning model evaluation metrics
 from sklearn.metrics import r2_score, mean_squared_error
@@ -419,25 +420,25 @@ feature_vector = ['SqFtTotLiving', 'SqFtLot', 'Bathrooms',
                   'Bedrooms', 'BldgGrade']
 target = 'AdjSalePrice'
 
-house_wtlm = LinearRegression()
-house_wtlm.fit(house_df[feature_vector], house_df[target], sample_weight=house_df.Weight)
+house_lm_wt = LinearRegression()
+house_lm_wt.fit(house_df[feature_vector], house_df[target], sample_weight=house_df.Weight)
 
 # compare the coefficients in linear and weighted regression
 print(pd.DataFrame({
     'predictor': feature_vector,
     'house_lm': house_lm.coef_,
-    'house_wt': house_wtlm.coef_,
+    'house_wt': house_lm_wt.coef_,
 }).append({
     'predictor': 'intercept', 
     'house_lm': house_lm.intercept_,
-    'house_wt': house_wtlm.intercept_,
+    'house_wt': house_lm_wt.intercept_,
 }, ignore_index=True))
 print("-----------------------------------------------------------------------")
 
 # compare the residuals (errors) in linear and weighted regression model predictions
 residuals = pd.DataFrame({
     'abs_residual_lm': np.abs(house_lm.predict(house_df[feature_vector]) - house_df[target]),
-    'abs_residual_wt': np.abs(house_wtlm.predict(house_df[feature_vector]) - house_df[target]),
+    'abs_residual_wt': np.abs(house_lm_wt.predict(house_df[feature_vector]) - house_df[target]),
     'Year': house_df['Year'],
 })
 
@@ -448,7 +449,103 @@ print("-----------------------------------------------------------------------")
 
 
 
+#-------------------------------------------------------------------------------
 
+
+
+# factor variables in regression
+
+feature_vector = ['SqFtTotLiving', 'SqFtLot',
+                  'Bathrooms', 'Bedrooms',
+                  'BldgGrade', 'PropertyType']
+
+XX = pd.get_dummies(house_df[feature_vector], drop_first=True)
+
+house_lm_factor = LinearRegression()
+house_lm_factor.fit(XX, house_df[target])
+
+print(f"Intercept: {house_lm_factor.intercept_:.3f}")
+print("Coefficients:")
+for name, coef in zip(XX.columns, house_lm_factor.coef_):
+    print(f"   {name}: {coef}")
+print("-----------------------------------------------------------------------")
+
+
+# factor variables with many levels
+print(pd.DataFrame(house_df['ZipCode'].value_counts()).transpose())
+print("-----------------------------------------------------------------------")
+
+house_df = pd.read_csv(HOUSE_CSV, sep='\t')
+
+feature_vector = ['SqFtTotLiving', 'SqFtLot', 'Bathrooms', 
+              'Bedrooms', 'BldgGrade']
+target = 'AdjSalePrice'
+
+house_lm = LinearRegression()
+house_lm.fit(house_df[feature_vector], house_df[target])
+
+
+zip_groups = pd.DataFrame([
+    *pd.DataFrame({
+        'ZipCode': house_df['ZipCode'],
+        'residual' : house_df[target] - house_lm.predict(house_df[feature_vector]),
+    })
+    .groupby(['ZipCode'])
+    .apply(lambda x: {
+        'ZipCode': x.iloc[0,0],
+        'count': len(x),
+        'median_residual': x.residual.median()
+    })
+]).sort_values('median_residual')
+
+zip_groups['cum_count'] = np.cumsum(zip_groups['count'])
+zip_groups['ZipGroup'] = pd.qcut(zip_groups['cum_count'], 5, labels=False, retbins=False)
+print(zip_groups.head())
+print("-----------------------------------------------------------------------")
+
+to_join = zip_groups[['ZipCode', 'ZipGroup']].set_index('ZipCode')
+house_df = house_df.join(to_join, on='ZipCode')
+house_df['ZipGroup'] = house_df['ZipGroup'].astype('category')
+
+
+
+#-------------------------------------------------------------------------------
+
+
+
+# correlated predictors
+
+feature_vector = ['Bedrooms', 'BldgGrade', 'PropertyType', 'YrBuilt']
+target = 'AdjSalePrice'
+
+XX = pd.get_dummies(house_df[feature_vector], drop_first=True)
+
+reduced_lm = LinearRegression()
+reduced_lm.fit(XX, house_df[target])
+
+print(f"Intercept: {reduced_lm.intercept_:.3f}")
+print("Coefficients:")
+for name, coef in zip(XX.columns, reduced_lm.coef_):
+    print(f"   {name}: {coef}")
+print("-----------------------------------------------------------------------")
+
+
+# confounding variables
+
+feature_vector = ['SqFtTotLiving', 'SqFtLot', 'Bathrooms', 'Bedrooms',
+              'BldgGrade', 'PropertyType', 'ZipGroup']
+target = 'AdjSalePrice'
+
+XX = pd.get_dummies(house_df[feature_vector], drop_first=True)
+
+confounding_lm = LinearRegression()
+confounding_lm.fit(XX, house_df[target])
+
+print(f"Intercept: {confounding_lm.intercept_:.3f}")
+print("Coefficients:")
+for name, coef in zip(XX.columns, confounding_lm.coef_):
+    print(f"   {name}: {coef:.3f}")
+print("-----------------------------------------------------------------------")
 
 
 
