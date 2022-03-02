@@ -31,7 +31,7 @@ import numpy as np
 # for plotting graphs
 import plotly.express as px
 import plotly.graph_objects as go
-
+import matplotlib.pyplot as plt
 # below three lines helps choose where to render the plotly plots
 # it needs plotly dependency kaleido installed for in-IDE rendering as svg
 import plotly.io as pio
@@ -41,7 +41,12 @@ pio.renderers.default = 'svg'
 # for machine learning models
 from sklearn.linear_model import LinearRegression
 import statsmodels.api as sm
+# to train linear regression models with interactions
 import statsmodels.formula.api as smf
+# to analyize the residuals of regression
+from statsmodels.stats.outliers_influence import OLSInfluence
+# to use generalized additive models
+from pygam import LinearGAM, s, l
 
 # for machine learning model evaluation metrics
 from sklearn.metrics import r2_score, mean_squared_error
@@ -546,6 +551,198 @@ print("Coefficients:")
 for name, coef in zip(XX.columns, confounding_lm.coef_):
     print(f"   {name}: {coef:.3f}")
 print("-----------------------------------------------------------------------")
+
+
+# interactions and main effects
+
+# an interaction term between two variables is needed if the relationship
+# between the variables and the response is interdependent
+model = smf.ols(
+                formula = 'AdjSalePrice ~ SqFtTotLiving*ZipGroup + SqFtLot + ' + 
+                'Bathrooms + Bedrooms + BldgGrade + PropertyType',
+                data = house_df
+                )
+results = model.fit()
+print(results.summary())
+print("-----------------------------------------------------------------------")
+
+
+
+#-------------------------------------------------------------------------------
+
+
+
+# regression diagnostics
+
+house_98105 = house_df.loc[house_df['ZipCode'] == 98105]
+
+feature_vector = ['SqFtTotLiving', 'SqFtLot', 
+                  'Bathrooms', 'Bedrooms',
+                  'BldgGrade']
+target = 'AdjSalePrice'
+
+house_outlier = sm.OLS( house_98105[target],
+                        house_98105[feature_vector].assign(const=1)
+                      )
+result_98105 = house_outlier.fit()
+print(result_98105.summary())
+print("-----------------------------------------------------------------------")
+
+influence = OLSInfluence(result_98105)
+std_residuals = influence.resid_studentized_internal
+
+print(
+       "\n",
+       f" index of row with lowest residual  :  {std_residuals.idxmin()}",
+       "\n",
+       f" lowest standardized residual       : {std_residuals.min():.3f}",
+       "\n",
+       " lowest residual                    :",
+       f"{result_98105.resid.loc[std_residuals.idxmin()]:.3f}",
+       "\n",
+       f" index of row with highest residual :  {std_residuals.idxmax()}",
+       "\n",
+       f" highest standardized residual      :  {std_residuals.max():.3f}",
+       "\n",
+       " highest residual                   : ",
+       f"{result_98105.resid.loc[std_residuals.idxmax()]:.3f}"
+     )
+print("-----------------------------------------------------------------------")
+
+# look at the outlier record
+outlier = house_98105.loc[std_residuals.idxmin(), :]
+print('AdjSalePrice', outlier[target])
+print(outlier[feature_vector])
+
+
+# inlfuential values
+
+# plotly figure setup
+fig = go.Figure()
+fig.add_trace(
+                go.Scatter(
+                            x = influence.hat_matrix_diag,
+                            y = influence.resid_studentized_internal,
+                            mode = 'markers',
+                            marker_size = 100 * np.sqrt(influence.cooks_distance[0]),
+                            opacity = 0.5
+                          )
+             )
+
+# adding horizontal lines
+fig.add_hline(
+                y = -2.5,
+                line_dash = 'dash',
+                line_color = 'grey',
+                line_width = 1
+              )
+fig.add_hline(
+                y = 2.5,
+                line_dash = 'dash',
+                line_color = 'grey',
+                line_width = 1
+             )
+
+# plotly figure layout
+fig.update_layout(
+                    xaxis_title = 'hat values',
+                    yaxis_title = 'studentized residuals'
+                 )
+fig.update_layout(
+    title_text = "size of the point is related to the cook's distance",
+    title_x=0.5
+                 )
+
+fig.show()
+
+mask = [dist < .08 for dist in influence.cooks_distance[0]]
+house_infl = house_98105.loc[mask]
+
+ols_infl = sm.OLS(
+                    house_infl[target],
+                    house_infl[feature_vector].assign(const=1)
+                 )
+result_infl = ols_infl.fit()
+
+print(pd.DataFrame({
+    'Original': result_98105.params,
+    'Influential removed': result_infl.params,
+    })
+    )
+print("-----------------------------------------------------------------------")
+
+
+fig, ax = plt.subplots(figsize=(5, 5))
+fig = sm.graphics.plot_ccpr(result_98105, 'SqFtTotLiving', ax=ax)
+
+plt.tight_layout()
+plt.show()
+
+"""fig = go.Figure()
+fig.add_trace(sm.graphics.plot_ccpr(result_98105, 'SqFtTotLiving'))
+fig.show()
+"""
+
+
+
+#-------------------------------------------------------------------------------
+
+
+
+# plynomial regression
+
+# fitting a quadratic polynomial for SqFtTotLiving
+formula = ( 'AdjSalePrice ~  SqFtTotLiving + np.power(SqFtTotLiving, 2) + ' +
+            'SqFtLot + Bathrooms + Bedrooms + BldgGrade' )
+model_poly = smf.ols(formula = formula, data = house_98105)
+result_poly = model_poly.fit()
+print("RESULTS of Polynomial Regression on house_98105")
+print("-----------------------------------------------------------------------")
+print(result_poly.summary())
+print("-----------------------------------------------------------------------")
+
+
+
+#-------------------------------------------------------------------------------
+
+
+
+# spline regression
+
+formula = ( 'AdjSalePrice ~  bs(SqFtTotLiving, df=6, degree=3) + ' +
+            'SqFtLot + Bathrooms + Bedrooms + BldgGrade' )
+model_poly = smf.ols(formula = formula, data = house_98105)
+result_poly = model_poly.fit()
+print("RESULTS of Polynomial Regression on house_98105")
+print("-----------------------------------------------------------------------")
+print(result_poly.summary())
+print("-----------------------------------------------------------------------")
+
+
+
+
+#-------------------------------------------------------------------------------
+
+
+
+# generalized additive models
+# a modelling technique that can be used to automatically fit a spline regression
+feature_vector = ['SqFtTotLiving', 'SqFtLot', 'Bathrooms', 
+              'Bedrooms', 'BldgGrade']
+target = 'AdjSalePrice'
+
+XX = house_98105[feature_vector].values
+YY = house_98105[target]
+
+gam = LinearGAM(s(0, n_splines=12) + l(1) + l(2) + l(3) + l(4))
+gam.gridsearch(XX, YY)
+print("RESULTS of Generalized additive modelling on house_98105")
+print("-----------------------------------------------------------------------")
+print(gam.summary())
+
+
+
+#-------------------------------------------------------------------------------
 
 
 
